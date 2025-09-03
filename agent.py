@@ -30,7 +30,7 @@ class NewsChat:
         self.session_id = article_id
 
         # LLM
-        llm = ChatOpenAI(openai_api_key=oai_key, model="gpt-4o")
+        llm = HuggingFaceHub(repo_id="google/flan-t5-large",model_kwargs={"temperature":0.2, "max_length":512})
 
 
         # Chroma client
