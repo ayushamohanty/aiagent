@@ -22,11 +22,14 @@ class NewsChat:
         oai_key = OS.getenv("OPENAI_API_KEY")
 
         # Embeddings
-        embeddings = OpenAIEmbeddings(openai_api_key=oai_key)
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+
         self.session_id = article_id
 
         # LLM
-        llm = ChatOpenAI(openai_api_key=oai_key, model='gpt-4o')
+        llm = ChatOpenAI(openai_api_key=oai_key, model="gpt-4o")
+
 
         # Chroma client
         chroma_client = chromadb.PersistentClient(path=Utils.DB_FOLDER)
