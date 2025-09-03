@@ -1,104 +1,68 @@
-import utils as Utils
-import os as OS
-from langchain_openai import ChatOpenAI
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.llms import HuggingFaceHub
+import os
+from huggingface_hub import InferenceClient
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+from langchain.vectorstores import Chroma
+from langchain.docstore.document import Document
+from langchain.schema import BaseRetriever
 
-from langchain_openai import OpenAIEmbeddings
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain.chains import create_retrieval_chain, create_history_aware_retriever
-from langchain_community.vectorstores import Chroma   # ✅ FIXED
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_community.chat_message_histories import ChatMessageHistory
-from langchain_core.runnables.history import RunnableWithMessageHistory
-from langchain_core.chat_history import BaseChatMessageHistory
-import chromadb
+
+class HuggingFaceLLM:
+    """Wrapper around HuggingFaceHub InferenceClient for LangChain compatibility."""
+
+    def __init__(self, model_name="google/flan-t5-large", max_new_tokens=512, temperature=0.2):
+        token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+        if not token:
+            raise ValueError("❌ Missing HUGGINGFACEHUB_API_TOKEN. Set it as env variable.")
+        self.client = InferenceClient(model=model_name, token=token)
+        self.max_new_tokens = max_new_tokens
+        self.temperature = temperature
+
+    def __call__(self, prompt: str) -> str:
+        response = self.client.text_generation(
+            prompt,
+            max_new_tokens=self.max_new_tokens,
+            temperature=self.temperature,
+        )
+        return response
 
 
 class NewsChat:
-    store = {}
-    session_id = ''
-    rag_chain = None
+    def __init__(self, id: str):
+        self.id = id
 
-    def __init__(self, article_id: str):
-        # Load OpenAI API key
-        oai_key = OS.getenv("OPENAI_API_KEY")
-
-        # Embeddings
-        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-
-
-        self.session_id = article_id
-
-        # LLM
-        llm = HuggingFaceHub(repo_id="google/flan-t5-large",model_kwargs={"temperature":0.2, "max_length":512})
-
-
-        # Chroma client
-        chroma_client = chromadb.PersistentClient(path=Utils.DB_FOLDER)
-
-        # Vectorstore
-        db = Chroma(
-            client=chroma_client,
-            persist_directory=Utils.DB_FOLDER,
-            embedding_function=embeddings,
-            collection_name='collection_1'
-        )
-        retriever = db.as_retriever()
-
-        # Contextualize query prompt
-        contextualize_q_system_prompt = """Given a chat history and the latest user question \
-            which might reference context in the chat history, formulate a standalone question \
-            which can be understood without the chat history. Do NOT answer the question, \
-            just reformulate it if needed and otherwise return it as is."""
-
-        contextualize_q_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", contextualize_q_system_prompt),
-                MessagesPlaceholder("chat_history"),
-                ("human", "{input}"),
-            ]
+        # Initialize custom LLM wrapper
+        self.llm = HuggingFaceLLM(
+            model_name="google/flan-t5-large",
+            max_new_tokens=512,
+            temperature=0.2,
         )
 
-        history_aware_retriever = create_history_aware_retriever(
-            llm, retriever, contextualize_q_prompt
+        # Simple prompt template
+        template = """You are a helpful AI assistant.
+Answer the question based on the context below.
+
+Context: {context}
+Question: {question}
+
+Answer:"""
+
+        prompt = PromptTemplate(
+            template=template, input_variables=["context", "question"]
         )
 
-        # QA prompt
-        qa_system_prompt = """You are an assistant for question-answering tasks. \
-            Use the following pieces of retrieved context to answer the question. \
-            If you don't know the answer, just say that you don't know. \
-            Use three sentences maximum and keep the answer concise.\
+        # Load vector DB retriever (Chroma example)
+        retriever: BaseRetriever = Chroma(persist_directory="db").as_retriever()
 
-            {context}"""
-
-        qa_prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", qa_system_prompt),
-                MessagesPlaceholder("chat_history"),
-                ("human", "{input}"),
-            ]
+        # Build RAG chain
+        self.rag_chain = RetrievalQA.from_chain_type(
+            llm=self.llm,
+            retriever=retriever,
+            chain_type="stuff",
+            chain_type_kwargs={"prompt": prompt},
         )
-
-        question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-        self.rag_chain = RunnableWithMessageHistory(
-            rag_chain,
-            self.get_session_history,
-            input_messages_key="input",
-            history_messages_key="chat_history",
-            output_messages_key="answer",
-        )
-
-    def get_session_history(self, session_id: str) -> BaseChatMessageHistory:
-        if session_id not in self.store:
-            self.store[session_id] = ChatMessageHistory()
-        return self.store[session_id]
 
     def ask(self, question: str) -> str:
-        response = self.rag_chain.invoke(
-            {"input": question},
-            config={"configurable": {"session_id": self.session_id}},
-        )["answer"]
-        return response
+        """Ask a question and get AI response."""
+        response = self.rag_chain.invoke({"query": question})
+        return response["result"]
