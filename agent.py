@@ -1,44 +1,23 @@
 import os
-from huggingface_hub import InferenceClient
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
 from langchain.vectorstores import Chroma
-from langchain.docstore.document import Document
-from langchain.schema import BaseRetriever
-
-
-class HuggingFaceLLM:
-    """Wrapper around HuggingFaceHub InferenceClient for LangChain compatibility."""
-
-    def __init__(self, model_name="google/flan-t5-large", max_new_tokens=512, temperature=0.2):
-        token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
-        if not token:
-            raise ValueError("❌ Missing HUGGINGFACEHUB_API_TOKEN. Set it as env variable.")
-        self.client = InferenceClient(model=model_name, token=token)
-        self.max_new_tokens = max_new_tokens
-        self.temperature = temperature
-
-    def __call__(self, prompt: str) -> str:
-        response = self.client.text_generation(
-            prompt,
-            max_new_tokens=self.max_new_tokens,
-            temperature=self.temperature,
-        )
-        return response
+from langchain_community.llms import HuggingFaceEndpoint
 
 
 class NewsChat:
     def __init__(self, id: str):
         self.id = id
 
-        # Initialize custom LLM wrapper
-        self.llm = HuggingFaceLLM(
-            model_name="google/flan-t5-large",
+        # ✅ Use LangChain's built-in HuggingFaceEndpoint
+        llm = HuggingFaceEndpoint(
+            repo_id="google/flan-t5-large",
             max_new_tokens=512,
             temperature=0.2,
+            huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"),
         )
 
-        # Simple prompt template
+        # Prompt
         template = """You are a helpful AI assistant.
 Answer the question based on the context below.
 
@@ -51,12 +30,12 @@ Answer:"""
             template=template, input_variables=["context", "question"]
         )
 
-        # Load vector DB retriever (Chroma example)
-        retriever: BaseRetriever = Chroma(persist_directory="db").as_retriever()
+        # Chroma retriever (adjust persist_directory as needed)
+        retriever = Chroma(persist_directory="db").as_retriever()
 
-        # Build RAG chain
+        # Build RetrievalQA
         self.rag_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
+            llm=llm,
             retriever=retriever,
             chain_type="stuff",
             chain_type_kwargs={"prompt": prompt},
