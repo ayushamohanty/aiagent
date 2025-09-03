@@ -1,15 +1,16 @@
 import os
 from langchain.chains import RetrievalQA
 from langchain.prompts import PromptTemplate
-from langchain.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma
 from langchain_community.llms import HuggingFaceEndpoint
+from langchain_community.embeddings import SentenceTransformerEmbeddings
 
 
 class NewsChat:
     def __init__(self, id: str):
         self.id = id
 
-        # ✅ Use LangChain's built-in HuggingFaceEndpoint
+        # ✅ HuggingFace LLM
         llm = HuggingFaceEndpoint(
             repo_id="google/flan-t5-large",
             max_new_tokens=512,
@@ -17,7 +18,10 @@ class NewsChat:
             huggingfacehub_api_token=os.getenv("HUGGINGFACEHUB_API_TOKEN"),
         )
 
-        # Prompt
+        # ✅ Embeddings
+        embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+
+        # ✅ Prompt
         template = """You are a helpful AI assistant.
 Answer the question based on the context below.
 
@@ -30,10 +34,13 @@ Answer:"""
             template=template, input_variables=["context", "question"]
         )
 
-        # Chroma retriever (adjust persist_directory as needed)
-        retriever = Chroma(persist_directory="db").as_retriever()
+        # ✅ Chroma retriever with embeddings
+        retriever = Chroma(
+            persist_directory="db",
+            embedding_function=embeddings
+        ).as_retriever()
 
-        # Build RetrievalQA
+        # ✅ RetrievalQA
         self.rag_chain = RetrievalQA.from_chain_type(
             llm=llm,
             retriever=retriever,
